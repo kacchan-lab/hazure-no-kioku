@@ -1,7 +1,7 @@
 import {chooseMessage} from './messages.mjs';
 import {KEY,newState,loadState,saveState,validateState,validText,recordUrge,markSuccess,deleteMessage} from './model.mjs';
 const $=id=>document.getElementById(id);
-let state, currentRecord=null,currentMessage=null,editing=null,timer=null,confirmation=null;
+let state, currentRecord=null,currentMessage=null,editing=null,timer=null,confirmation=null,phaseTimers=[];
 try{state=loadState(localStorage)}catch{state=newState();$('notice').textContent='保存データを読み込めませんでした。元のデータは上書きしていません。必要なら設定からバックアップしてください。';}
 function notify(text){$('notice').textContent=text;}
 function commit(next){try{saveState(localStorage,next);state=next;return true}catch{notify('保存できませんでした。ブラウザの保存設定や空き容量を確認してください。操作は反映していません。');return false}}
@@ -14,11 +14,13 @@ function switchPage(page){document.querySelectorAll('.page').forEach(p=>p.classL
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchPage(b.dataset.page));
 document.querySelector('.brand').onclick=e=>{e.preventDefault();switchPage('home')};
 $('intensity').oninput=()=>{$('intensity-value').textContent=$('intensity').value};
-function finishAnimation(){clearTimeout(timer);timer=null;$('animation').classList.add('hidden');$('result').classList.remove('hidden');$('urge').disabled=false;$('message').textContent=currentMessage.text;$('message-kind').textContent=kindLabel(currentMessage);renderFavorite();$('success').disabled=false;$('success').textContent='今日は打たずに済んだ';$('result').focus();}
+function stopAnimationTimers(){clearTimeout(timer);timer=null;phaseTimers.forEach(clearTimeout);phaseTimers=[];}
+function setAnimationPhase(phase,text){$('animation').dataset.phase=phase;$('animation-status').textContent=text;}
+function finishAnimation(){stopAnimationTimers();$('animation').classList.add('hidden');$('result').classList.remove('hidden');$('urge').disabled=false;$('message').textContent=currentMessage.text;$('message-kind').textContent=kindLabel(currentMessage);renderFavorite();$('success').disabled=false;$('success').textContent='今日は打たずに済んだ';$('result').focus();}
 $('urge').onclick=()=>{
  const next=clone();const message=chooseMessage(next.messages,next.lastMessageId);const record=recordUrge(next,Number($('intensity').value));next.lastMessageId=message.id;
  if(!commit(next))return;currentMessage=message;currentRecord=record.id;$('result').classList.add('hidden');
- if(state.settings.animation&&!matchMedia('(prefers-reduced-motion: reduce)').matches){$('urge').disabled=true;$('animation').classList.remove('hidden');const tile=document.querySelector('.drift');tile.style.animation='none';void tile.offsetWidth;tile.style.animation='';timer=setTimeout(finishAnimation,1800)}else finishAnimation();
+ if(state.settings.animation&&!matchMedia('(prefers-reduced-motion: reduce)').matches){stopAnimationTimers();$('urge').disabled=true;setAnimationPhase('start','リーチ開始');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});phaseTimers=[setTimeout(()=>setAnimationPhase('moving','図柄が、ゆっくり止まります。'),1500),setTimeout(()=>setAnimationPhase('miss','ハズレ'),3500)];timer=setTimeout(finishAnimation,5000)}else finishAnimation();
 };
 $('skip').onclick=finishAnimation;
 matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',e=>{if(e.matches&&timer)finishAnimation();});
@@ -44,7 +46,7 @@ function render(){
 $('animation-setting').onchange=()=>{const next=clone();next.settings.animation=$('animation-setting').checked;if(commit(next)){notify('演出設定を保存しました。');if(!state.settings.animation&&timer)finishAnimation();}render()};
 $('export').onclick=()=>{try{const raw=localStorage.getItem(KEY);const contents=raw??JSON.stringify(state);const url=URL.createObjectURL(new Blob([contents],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='hazure-no-kioku.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('JSONを書き出しました。ファイルを安全に保管してください。')}catch{notify('データを書き出せませんでした。')}};
 $('import').onchange=async()=>{const file=$('import').files[0];$('import').value='';if(!file)return;try{if(file.size>5*1024*1024)throw new Error('ファイルは5MB以内にしてください。');const data=validateState(JSON.parse(await file.text()));confirmAction('データを置き換える','現在の記録・言葉・設定を読み込んだデータで置き換えます。続けますか？',()=>{if(commit(data)){clearCurrent();resetForm();render();notify('データを読み込みました。')}})}catch(error){notify(`読み込めませんでした。${error instanceof SyntaxError?'正しいJSONファイルを選んでください。':error.message}`)}};
-function clearCurrent(){clearTimeout(timer);timer=null;currentRecord=null;currentMessage=null;$('result').classList.add('hidden');$('animation').classList.add('hidden');$('urge').disabled=false;}
+function clearCurrent(){stopAnimationTimers();currentRecord=null;currentMessage=null;$('result').classList.add('hidden');$('animation').classList.add('hidden');$('urge').disabled=false;}
 $('delete-all').onclick=()=>confirmAction('全データを削除','すべての記録・お気に入り・設定・追加や編集した言葉を削除します。元に戻せません。',()=>{try{localStorage.removeItem(KEY);state=newState();clearCurrent();resetForm();$('favorites-only').checked=false;$('intensity').value='5';$('intensity-value').textContent='5';render();notify('全データを削除し、初期状態に戻しました。')}catch{notify('削除できませんでした。ブラウザの設定を確認してください。')}});
 window.addEventListener('storage',e=>{if(e.key!==KEY)return;try{state=loadState(localStorage);clearCurrent();resetForm();render();notify('別のタブで変更されたデータを反映しました。')}catch{notify('別のタブのデータを読み込めませんでした。')}});
 render();
