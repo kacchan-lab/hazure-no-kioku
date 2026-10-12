@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {analyzeRecords,localDateKey} from '../js/analysis.mjs';
+import {createDemoAccess} from '../js/plus-access.mjs';
+const now=new Date(2026,9,12,12);
+const record=(ago,success,hour=10)=>{const at=new Date(2026,9,12-ago,hour);return {at:at.toISOString(),success};};
+test('7日集計：今日を含み、7日前を除外。回数と成功率は衝動単位',()=>{const s=analyzeRecords([record(0,true),record(0,false),record(1,true),record(6,false),record(7,true)],7,now);assert.equal(s.start,'2026-10-06');assert.equal(s.end,'2026-10-12');assert.equal(s.urges,4);assert.equal(s.successes,2);assert.equal(s.rate,50);assert.equal(s.recordedDays,3);assert.equal(s.daily.length,7)});
+test('30日集計：29日前を含み、30日前を除外',()=>{const s=analyzeRecords([record(29,true),record(30,true),record(7,false)],30,now);assert.equal(s.daily.length,30);assert.equal(s.urges,2);assert.equal(s.successes,1);assert.equal(s.rate,50)});
+test('空の記録は成功率null、記録なしを成功と数えない',()=>{const s=analyzeRecords([],7,now);assert.equal(s.rate,null);assert.equal(s.recordedDays,0);assert.ok(s.daily.every(r=>r.urges===0&&r.successes===0));const one=analyzeRecords([record(0,false)],7,now);assert.equal(one.rate,0);assert.equal(one.recordedDays,1)});
+test('未来は除外、開始日0時と現在時刻は含む',()=>{const begin=new Date(2026,9,6);const before=new Date(begin.getTime()-1);const later=new Date(now.getTime()+1);const s=analyzeRecords([begin,before,now,later].map(at=>({at:at.toISOString(),success:true})),7,now);assert.equal(s.urges,2);assert.equal(s.successes,2)});
+test('現地日付でUTC記録を振り分ける',()=>{const midnight=new Date(2026,9,12,0,5);const s=analyzeRecords([{at:midnight.toISOString(),success:true}],7,now);assert.equal(s.daily.at(-1).urges,1);assert.equal(localDateKey(midnight),'2026-10-12')});
+test('元の記録の変更・並べ替えをしない',()=>{const records=Object.freeze([Object.freeze(record(2,true)),Object.freeze(record(0,false))]);const copy=JSON.stringify(records);analyzeRecords(records,7,now);assert.equal(JSON.stringify(records),copy)});
+test('年跨ぎと夏時間を含む期間も暦日数を維持',()=>{for(const d of [new Date(2026,0,3,12),new Date(2026,2,12,12),new Date(2026,10,5,12)]){const s=analyzeRecords([],30,d);assert.equal(s.daily.length,30);assert.equal(new Set(s.daily.map(r=>r.date)).size,30);assert.equal(s.end,localDateKey(d))}});
+test('1件の100%は記録1件・記録日1日とともに返す',()=>{const s=analyzeRecords([record(0,true)],7,now);assert.equal(s.rate,100);assert.equal(s.urges,1);assert.equal(s.recordedDays,1)});
+test('無効な集計期間と現在時刻を拒否',()=>{assert.throws(()=>analyzeRecords([],14,now));assert.throws(()=>analyzeRecords([],7,new Date('bad')))});
+test('開発用アクセスはPLUSのみ許可し、初期化でFREEに戻る',async()=>{const access=createDemoAccess();let changes=0;const unsubscribe=access.subscribe(()=>changes++);for(const status of ['free','pending','error','plus']){access.setDemoStatus(status);assert.equal((await access.getAccess()).allowed,status==='plus')}assert.equal(changes,4);unsubscribe();access.setDemoStatus('free');assert.equal(changes,4);assert.equal((await createDemoAccess().getAccess()).allowed,false)});

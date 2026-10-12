@@ -1,0 +1,30 @@
+const {launchChromium,screenshotPath}=require('./browser-launch.cjs');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+(async()=>{
+ const browser=await launchChromium();
+ const context=await browser.newContext({viewport:{width:375,height:812},acceptDownloads:true});
+ const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const visible=async id=>assert.equal(await page.locator(id).isVisible(),true,id+' visible');
+ const state=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('hazure-no-kioku-v1')));
+ await page.goto('http://127.0.0.1:8000');await visible('#urge');
+ await page.locator('#intensity').fill('8');await page.locator('#urge').click();await visible('#animation');assert.equal((await state()).records[0].intensity,8);assert.equal((await state()).records[0].success,false);
+ await page.locator('#skip').click();await visible('#result');assert.equal(await page.locator('.result-label').textContent(),'ハズレ');const first=(await state()).lastMessageId;
+ await page.locator('#favorite').click();assert.equal((await state()).favorites.length,1);
+ await page.locator('#success').click();assert.equal((await state()).records.filter(r=>r.success).length,1);assert.equal(await page.locator('#success').isDisabled(),true);
+ await page.locator('#urge').click();await page.locator('#result').waitFor({state:'visible',timeout:7000});assert.notEqual((await state()).lastMessageId,first);assert.equal((await state()).records.filter(r=>r.success).length,1);
+ await page.locator('[data-page=settings]').click();await page.locator('#animation-setting').uncheck();await page.reload();await page.locator('#urge').click();await visible('#result');assert.equal(await page.locator('#animation').isVisible(),false);assert.equal((await state()).records.length,3);
+ await page.locator('[data-page=words]').click();await page.locator('#word-input').fill('<img src=x onerror=alert(1)> 帰ろう');await page.locator('#word-submit').click();assert.equal((await state()).messages.length,41);assert.equal(await page.locator('#word-list img').count(),0);
+ let custom=page.locator('.word-item').filter({hasText:'<img src=x onerror=alert(1)> 帰ろう'});await custom.getByRole('button',{name:'編集',exact:true}).click();await page.locator('#word-input').fill('家でお茶を飲もう');await page.locator('#word-submit').click();assert.equal((await state()).messages.at(-1).text,'家でお茶を飲もう');
+ custom=page.locator('.word-item').filter({hasText:'家でお茶を飲もう'});await custom.getByRole('button',{name:'お気に入り'}).click();await page.locator('#favorites-only').check();assert.equal(await page.locator('#word-list .word-item').count(),2);await page.locator('#favorites-only').uncheck();
+ await custom.getByRole('button',{name:'削除',exact:true}).click();await page.locator('#confirm-cancel').click();assert.equal((await state()).messages.length,41);await custom.getByRole('button',{name:'削除',exact:true}).click();await page.locator('#confirm-ok').click();assert.equal((await state()).messages.length,40);
+ await page.locator('[data-page=history]').click();assert.equal(await page.locator('#total').textContent(),'3');assert.equal(await page.locator('#successful').textContent(),'1');assert.equal(await page.locator('.record-item').count(),3);
+ await page.locator('[data-page=settings]').click();const backup=await state();const downloaded=page.waitForEvent('download');await page.locator('#export').click();const download=await downloaded;assert.deepEqual(JSON.parse(fs.readFileSync(await download.path(),'utf8')),backup);
+ await page.locator('#import').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{"version":2}')});await page.waitForFunction(()=>document.querySelector('#notice').textContent.includes('読み込めません'));assert.deepEqual(await state(),backup);
+ await page.locator('#delete-all').click();await page.locator('#confirm-cancel').click();assert.deepEqual(await state(),backup);await page.locator('#delete-all').click();await page.locator('#confirm-ok').click();assert.equal(await state(),null);
+ await page.locator('#import').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(backup))});await page.locator('#confirm-ok').click();assert.deepEqual(await state(),backup);
+ for(const width of [320,375,390,768,1440]){await page.setViewportSize({width,height:900});for(const tab of ['home','history','words','settings']){await page.locator(`[data-page=${tab}]`).click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${width} ${tab} overflow`)}await page.locator('[data-page=home]').click();await page.screenshot({path:screenshotPath(`hazure-${width}.png`),fullPage:true})}
+ const reduced=await browser.newContext({reducedMotion:'reduce',viewport:{width:320,height:800}});const rp=await reduced.newPage();await rp.goto('http://127.0.0.1:8000');await rp.locator('#urge').click();assert.equal(await rp.locator('#animation').isVisible(),false);assert.equal(await rp.locator('#result').isVisible(),true);
+ const failure=await browser.newContext();await failure.addInitScript(()=>{Storage.prototype.setItem=function(){throw new DOMException('quota','QuotaExceededError')}});const fp=await failure.newPage();await fp.goto('http://127.0.0.1:8000');await fp.locator('#urge').click();assert.equal(await fp.locator('#result').isVisible(),false);assert.match(await fp.locator('#notice').textContent(),/保存できません/);
+ assert.deepEqual(errors,[]);await browser.close();console.log('PASS browser: animation/skip/OFF/reduced-motion, random, records/success, favorites/CRUD/XSS, reload, export/import/delete, storage failure, 320–1440px all tabs; no page errors');
+})().catch(e=>{console.error(e);process.exit(1)});

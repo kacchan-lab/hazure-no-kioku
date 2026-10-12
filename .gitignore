@@ -1,0 +1,12 @@
+/node_modules/
+/playwright-report/
+/test-results/
+/artifacts/
+/backups/
+/.cache/
+__pycache__/
+*.pyc
+*.log
+.env
+.env.*
+*.zip

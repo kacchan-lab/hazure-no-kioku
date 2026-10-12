@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {INITIAL_MESSAGES,chooseMessage} from '../js/messages.mjs';
+import {KEY,newState,validText,validIntensity,validateState,saveState,loadState,recordUrge,markSuccess,deleteMessage} from '../js/model.mjs';
+const storage=()=>{const m=new Map();return {getItem:k=>m.get(k)??null,setItem:(k,v)=>m.set(k,v)}};
+test('初期メッセージ40個・個人の言葉4個・格言36個',()=>{assert.equal(INITIAL_MESSAGES.length,40);assert.equal(INITIAL_MESSAGES.filter(m=>m.kind==='personal').length,4);assert.equal(new Set(INITIAL_MESSAGES.map(m=>m.id)).size,40)});
+test('ランダム選択は直前を除外し、両端の候補を選べる',()=>{const previous=INITIAL_MESSAGES[0].id;for(const r of [0,.25,.5,.999999])assert.notEqual(chooseMessage(INITIAL_MESSAGES,previous,()=>r).id,previous);assert.equal(chooseMessage(INITIAL_MESSAGES,null,()=>0).id,INITIAL_MESSAGES[0].id);assert.equal(chooseMessage(INITIAL_MESSAGES,null,()=>.999).id,INITIAL_MESSAGES.at(-1).id)});
+test('入力検証：空文字、型、文字数、強さの境界',()=>{assert.equal(validText(' あの日 '),'あの日');for(const x of ['', ' ', 'a'.repeat(121),null])assert.throws(()=>validText(x));for(const x of [-1,11,2.5,'5',NaN])assert.throws(()=>validIntensity(x));assert.equal(validIntensity(0),0);assert.equal(validIntensity(10),10)});
+test('衝動を記録しても成功にならず、同じ衝動の自己申告は一度だけ',()=>{const s=newState();const r=recordUrge(s,8,'r1','2026-10-12T10:00:00Z');assert.equal(r.success,false);assert.equal(markSuccess(s,'r1'),true);assert.equal(markSuccess(s,'r1'),false);assert.equal(markSuccess(s,'missing'),false);recordUrge(s,0,'r2');assert.equal(s.records.filter(r=>r.success).length,1);assert.equal(s.records.length,2)});
+test('保存と読み込みで設定・言葉・お気に入り・記録を保持',()=>{const st=storage(),s=newState();s.settings.animation=false;s.favorites.push(s.messages[0].id);s.messages[0].text='帰ろう';recordUrge(s,10,'r');saveState(st,s);assert.deepEqual(loadState(st),s);assert.deepEqual(loadState(storage()),newState())});
+test('破損、未知の形式、重複ID、不正参照を拒否',()=>{for(const alter of [s=>s.version=2,s=>s.messages=[],s=>s.messages.push(s.messages[0]),s=>s.favorites=['missing'],s=>s.lastMessageId='missing',s=>s.settings.animation='false',s=>s.records=[{id:'r',at:'bad',intensity:1,success:false}],s=>s.records=[{id:'r',at:new Date().toISOString(),intensity:11,success:false}]]){const s=newState();alter(s);assert.throws(()=>validateState(s))}const st=storage();st.setItem(KEY,'{');assert.throws(()=>loadState(st))});
+test('削除した言葉のお気に入りと直前参照を解除',()=>{const s=newState(),id=s.messages[0].id;s.favorites=[id];s.lastMessageId=id;deleteMessage(s,id);assert.equal(s.messages.length,39);assert.deepEqual(s.favorites,[]);assert.equal(s.lastMessageId,null);validateState(s)});
+test('保存エラーを握りつぶさない',()=>{assert.throws(()=>saveState({setItem(){throw new Error('quota')}},newState()),/quota/)});
