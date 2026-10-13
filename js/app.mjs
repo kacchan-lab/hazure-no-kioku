@@ -15,7 +15,8 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchPage(b.da
 document.querySelector('.brand').onclick=e=>{e.preventDefault();switchPage('home')};
 $('intensity').oninput=()=>{$('intensity-value').textContent=$('intensity').value};
 function stopAnimationTimers(){animationRun++;clearTimeout(timer);timer=null;phaseTimers.forEach(clearTimeout);phaseTimers=[];}
-function setAnimationPhase(phase,text){$('animation').dataset.phase=phase;$('animation-status').textContent=text;}
+function setAnimationCaption(caption){$('animation').dataset.caption=caption;$('animation-announcement').textContent=document.querySelector(`#animation [data-line="${caption}"]`).textContent;}
+function setAnimationPhase(phase,caption){$('animation').dataset.phase=phase;if(caption)setAnimationCaption(caption);}
 function finishAnimation({focus=true}={}){stopAnimationTimers();if(!currentMessage)return;document.querySelectorAll('#animation .tiles>span').forEach(slot=>slot.dataset.state='landed');$('animation').classList.add('hidden');$('result').classList.remove('hidden');$('urge').disabled=false;$('message').textContent=currentMessage.text;$('message-kind').textContent=kindLabel(currentMessage);renderFavorite();$('success').disabled=false;$('success').textContent='今日は打たずに済んだ';if(focus&&!$('home').classList.contains('hidden'))$('result').focus();}
 $('urge').onclick=()=>{
  if(timer||$('urge').disabled)return;
@@ -24,9 +25,9 @@ $('urge').onclick=()=>{
  if(state.settings.animation&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
   stopAnimationTimers();const run=animationRun;const slots=[...document.querySelectorAll('#animation .tiles>span')];slots.forEach(slot=>slot.dataset.state='waiting');
   const later=(delay,action)=>setTimeout(()=>{if(run===animationRun)action();},delay);
-  const drop=(index,phase,text)=>{slots[index].dataset.state='falling';setAnimationPhase(phase,text);};
-  $('urge').disabled=true;drop(0,'left','左の数字が降りてきます。');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});
-  phaseTimers=[later(1500,()=>slots[0].dataset.state='landed'),later(1800,()=>drop(2,'right','右の数字が降りてきます。')),later(3300,()=>slots[2].dataset.state='landed'),later(3600,()=>drop(1,'center','中央の数字が降りてきます。')),later(5100,()=>{slots[1].dataset.state='landed';setAnimationPhase('miss','ハズレ');})];
+  const drop=(index,phase)=>{slots[index].dataset.state='falling';setAnimationPhase(phase);};
+  $('urge').disabled=true;setAnimationCaption('first');drop(0,'left');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});
+  phaseTimers=[later(1500,()=>slots[0].dataset.state='landed'),later(1800,()=>drop(2,'right')),later(3300,()=>{slots[2].dataset.state='landed';setAnimationCaption('second');}),later(3600,()=>drop(1,'center')),later(5100,()=>{slots[1].dataset.state='landed';setAnimationPhase('miss','miss');})];
   timer=later(6000,finishAnimation);
  }else finishAnimation();
 };

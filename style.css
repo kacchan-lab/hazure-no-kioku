@@ -2,14 +2,20 @@
 
 /* Six seconds: left 0–1.5s, right 1.8–3.3s, center 3.6–5.1s, miss until 6s. */
 #animation{scroll-margin:20px;min-height:330px}
-#animation-status{font-size:22px;font-weight:700;line-height:1.6;min-height:70px;display:grid;place-items:center;margin:12px 0;color:var(--green)}
+#animation-status{font-size:22px;font-weight:700;line-height:1.6;height:80px;position:relative;margin:12px 0;color:var(--green)}
+#animation .animation-line{position:absolute;left:0;top:50%;width:100%;transform:translateY(-50%);opacity:0;transition:opacity .18s ease-in-out;overflow-wrap:anywhere}
+#animation[data-caption=first] [data-line=first],#animation[data-caption=second] [data-line=second],#animation[data-caption=miss] [data-line=miss]{opacity:1}
+#animation [data-line=second]{transition-delay:.18s}
+#animation .animation-phrase{display:inline-block;white-space:nowrap}
+#animation-announcement{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 #animation .tiles{display:flex;justify-content:center;gap:10px;color:var(--green)}
 #animation .tiles>span{flex:1;min-width:0;max-width:84px;height:112px;overflow:hidden;display:grid;place-items:center;border:1px solid var(--border);border-radius:12px;background:#f6f8f3}
 #animation .tiles b{display:block;font-size:clamp(48px,16vw,70px);font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums}
 #animation .tiles>span[data-state=waiting] b{transform:translateY(-155%);opacity:0}
 #animation .tiles>span[data-state=falling] b{animation:digit-drop 1.5s both}
 #animation .tiles>span[data-state=landed] b{transform:translateY(0);opacity:1}
-#animation[data-phase=miss] #animation-status{font-size:46px;letter-spacing:.12em;color:#303936}
+#animation[data-caption=miss] .animation-line{transition:none}
+#animation [data-line=miss]{font-size:46px;letter-spacing:.12em;color:#303936}
 @keyframes digit-drop{
   0%{transform:translateY(-155%);opacity:0;animation-timing-function:cubic-bezier(.16,.65,.3,1)}
   15%{opacity:1}
@@ -17,7 +23,7 @@
   90%{transform:translateY(-5px);opacity:1;animation-timing-function:ease-in}
   100%{transform:translateY(0);opacity:1}
 }
-@media(prefers-reduced-motion:reduce){#animation .tiles b{animation:none!important;transform:none!important;opacity:1!important}}
+@media(prefers-reduced-motion:reduce){#animation .tiles b{animation:none!important;transform:none!important;opacity:1!important}#animation .animation-line{transition:none!important}}
 /* PLUS presentation only; existing FREE and animation styles stay unchanged. */
 .plus-invite{text-align:center;border-top:1px solid var(--border);margin-top:32px;padding-top:24px}
 #home:has(#animation:not(.hidden)) .plus-invite,#home:has(#result:not(.hidden)) .plus-invite{display:none}
