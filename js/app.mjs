@@ -1,7 +1,7 @@
 import {chooseMessage} from './messages.mjs';
 import {KEY,newState,loadState,saveState,validateState,validText,recordUrge,markSuccess,deleteMessage} from './model.mjs';
 const $=id=>document.getElementById(id);
-let state, currentRecord=null,currentMessage=null,editing=null,timer=null,confirmation=null,phaseTimers=[];
+let state, currentRecord=null,currentMessage=null,editing=null,timer=null,confirmation=null,phaseTimers=[],animationRun=0;
 try{state=loadState(localStorage)}catch{state=newState();$('notice').textContent='保存データを読み込めませんでした。元のデータは上書きしていません。必要なら設定からバックアップしてください。';}
 function notify(text){$('notice').textContent=text;}
 function commit(next){try{saveState(localStorage,next);state=next;return true}catch{notify('保存できませんでした。ブラウザの保存設定や空き容量を確認してください。操作は反映していません。');return false}}
@@ -10,19 +10,30 @@ function confirmAction(title,text,action){confirmation=action;$('confirm-title')
 $('confirm-cancel').onclick=()=>{$('confirm-dialog').close();confirmation=null};
 $('confirm-ok').onclick=()=>{const action=confirmation;confirmation=null;$('confirm-dialog').close();action?.()};
 $('confirm-dialog').addEventListener('cancel',()=>{confirmation=null});
-function switchPage(page){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('hidden',p.id!==page));document.querySelectorAll('nav button').forEach(b=>{if(b.dataset.page===page)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});render();}
+function switchPage(page){if(timer)finishAnimation({focus:false});document.querySelectorAll('.page').forEach(p=>p.classList.toggle('hidden',p.id!==page));document.querySelectorAll('nav button').forEach(b=>{if(b.dataset.page===page)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});render();}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchPage(b.dataset.page));
 document.querySelector('.brand').onclick=e=>{e.preventDefault();switchPage('home')};
 $('intensity').oninput=()=>{$('intensity-value').textContent=$('intensity').value};
-function stopAnimationTimers(){clearTimeout(timer);timer=null;phaseTimers.forEach(clearTimeout);phaseTimers=[];}
+function stopAnimationTimers(){animationRun++;clearTimeout(timer);timer=null;phaseTimers.forEach(clearTimeout);phaseTimers=[];}
 function setAnimationPhase(phase,text){$('animation').dataset.phase=phase;$('animation-status').textContent=text;}
-function finishAnimation(){stopAnimationTimers();$('animation').classList.add('hidden');$('result').classList.remove('hidden');$('urge').disabled=false;$('message').textContent=currentMessage.text;$('message-kind').textContent=kindLabel(currentMessage);renderFavorite();$('success').disabled=false;$('success').textContent='今日は打たずに済んだ';$('result').focus();}
+function finishAnimation({focus=true}={}){stopAnimationTimers();if(!currentMessage)return;document.querySelectorAll('#animation .tiles>span').forEach(slot=>slot.dataset.state='landed');$('animation').classList.add('hidden');$('result').classList.remove('hidden');$('urge').disabled=false;$('message').textContent=currentMessage.text;$('message-kind').textContent=kindLabel(currentMessage);renderFavorite();$('success').disabled=false;$('success').textContent='今日は打たずに済んだ';if(focus&&!$('home').classList.contains('hidden'))$('result').focus();}
 $('urge').onclick=()=>{
+ if(timer||$('urge').disabled)return;
  const next=clone();const message=chooseMessage(next.messages,next.lastMessageId);const record=recordUrge(next,Number($('intensity').value));next.lastMessageId=message.id;
  if(!commit(next))return;currentMessage=message;currentRecord=record.id;$('result').classList.add('hidden');
- if(state.settings.animation&&!matchMedia('(prefers-reduced-motion: reduce)').matches){stopAnimationTimers();$('urge').disabled=true;setAnimationPhase('start','リーチ開始');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});phaseTimers=[setTimeout(()=>setAnimationPhase('moving','図柄が、ゆっくり止まります。'),1500),setTimeout(()=>setAnimationPhase('miss','ハズレ'),3500)];timer=setTimeout(finishAnimation,5000)}else finishAnimation();
+ if(state.settings.animation&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+  stopAnimationTimers();const run=animationRun;const slots=[...document.querySelectorAll('#animation .tiles>span')];slots.forEach(slot=>slot.dataset.state='waiting');
+  const later=(delay,action)=>setTimeout(()=>{if(run===animationRun)action();},delay);
+  const drop=(index,phase,text)=>{slots[index].dataset.state='falling';setAnimationPhase(phase,text);};
+  $('urge').disabled=true;drop(0,'left','左の数字が降りてきます。');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});
+  phaseTimers=[later(1500,()=>slots[0].dataset.state='landed'),later(1800,()=>drop(1,'center','中央の数字が降りてきます。')),later(3300,()=>slots[1].dataset.state='landed'),later(3600,()=>drop(2,'right','右の数字が降りてきます。')),later(5100,()=>{slots[2].dataset.state='landed';setAnimationPhase('miss','ハズレ');})];
+  timer=later(6000,finishAnimation);
+ }else finishAnimation();
 };
 $('skip').onclick=finishAnimation;
+// Other modules can switch pages too; finish without moving focus from that page.
+new MutationObserver(()=>{if($('home').classList.contains('hidden')&&timer)finishAnimation({focus:false});}).observe($('home'),{attributes:true,attributeFilter:['class']});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&timer)finishAnimation({focus:false});});
 matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',e=>{if(e.matches&&timer)finishAnimation();});
 function kindLabel(m){return m.kind==='personal'?'自分の過去の言葉':'オリジナルの禁パチ格言';}
 function renderFavorite(){if(!currentMessage)return;const on=state.favorites.includes(currentMessage.id);$('favorite').textContent=on?'★ お気に入り登録済み':'☆ お気に入りに登録';$('favorite').setAttribute('aria-pressed',String(on));}
