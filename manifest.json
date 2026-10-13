@@ -1,0 +1,16 @@
+{
+  "name": "ハズレの記憶",
+  "short_name": "ハズレの記憶",
+  "description": "パチンコしたい気持ちに、ひと呼吸。過去の自分の言葉を読んで立ち止まるためのアプリ。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f3",
+  "theme_color": "#315c49",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
