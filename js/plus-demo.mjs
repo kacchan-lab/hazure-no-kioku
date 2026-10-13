@@ -14,12 +14,12 @@ const money=mountMoney({container:$('plus-money'),access});
 const plan=mountPlan({container:$('plus-plan'),access});
 const states = {
  free: ['FREE（デモ）', '無料版の表示例です。現在の無料機能はすべて利用できます。'],
- plus: ['PLUS（デモ・未購入）', '購入済みの場合の表示例です。実際の購入はありません。分析・回避額・資産形成試算・行動プランを開発用デモとして確認できます。'],
- pending: ['購入確認中（デモ）', '購入確認を待つ場合の表示例です。通信や決済は行っていません。無料版は引き続き利用できます。'],
- error: ['確認失敗（デモ）', '購入状態を確認できない場合の表示例です。実際の通信エラーではありません。無料機能と保存済みの記録は維持されます。']
+ plus: ['PLUS（デモ・未契約）', '有効な契約中の場合の表示例です。実際の契約はありません。分析・回避額・資産形成試算・行動プランを開発用デモとして確認できます。'],
+ pending: ['契約確認中（デモ）', '契約確認を待つ場合の表示例です。通信や決済は行っていません。無料版は引き続き利用できます。'],
+ error: ['確認失敗（デモ）', '契約状態を確認できない場合の表示例です。実際の通信エラーではありません。無料機能と保存済みの記録は維持されます。']
 };
 function renderDemo() {
- if(!demoAllowed){$('plus-demo-badge').textContent='購入権限：未確認';$('plus-demo-description').textContent='本番・ホスト環境では開発用デモを利用できません。ログインだけでPLUSは解放しません。';access.setDemoStatus('free');return;}
+ if(!demoAllowed){$('plus-demo-badge').textContent='契約権限：未確認';$('plus-demo-description').textContent='本番・ホスト環境では開発用デモを利用できません。ログインだけでPLUSは解放しません。';access.setDemoStatus('free');return;}
  const [badge, description] = states[$('plus-demo-state').value] ?? states.free;
  $('plus-demo-badge').textContent = badge;
  $('plus-demo-description').textContent = description;

@@ -1,224 +1,155 @@
-# ハズレの記憶 PLUS：認証・購入権限基盤設計
+# ハズレの記憶 PLUS：月額契約・認証・権限設計
 
-設計対象：GitHub Pages、販売予定480円（税込・買い切り）。月額料金・自動更新なし。
+販売予定：月額300円（税込）、自動更新あり、いつでも解約可能。FREEは無料。旧一回払い設計を置き換える。販売・契約管理は未実装で、SQLは未適用。今回の変更は設計、SQL案、画面文言、テストのみ。実際のStripe/Supabase接続や公開は行わない。
 
-今回は価格表示と設計書のみ変更する。プロジェクト作成、サービス接続、ログイン実装、Stripe連携、公開設定変更は未実施。SQL/API/設定は以下の実装案であり、実行していない。設定値・最新料金・サービス設定は未確認で、推測して埋めない。
-
-## 1. 現在の構成と変更境界
-
-フロントはHTML/CSS/JavaScriptモジュール。フレームワークとビルド処理はなし。bootstrap.mjsは復元ジャーナルを確認してからFREEとPLUSデモを起動する。FREE、回避額、行動プランの独立localStorageキーと一括バックアップv1を維持する。
-
-plus-access.mjsの開発用providerは getAccess() と subscribe(listener) を公開し、分析・回避額・行動プランUIに注入している。本番は同じインターフェースのサーバー確認providerへ置き換える。FREE本体、5秒演出、ランダム表示、既存記録の意味を変更しない。
-
-認証エラーでアプリ全体をinertにしない。現在の一括復元回復失敗によるデータ保護の編集停止と、将来の認証・購入確認失敗は別の状態である。
-
-## 2. 推奨アーキテクチャ
+## 構成と守る境界
 
 ```mermaid
 flowchart LR
-  Browser[GitHub Pages上の静的アプリ] -->|メール認証・セッション| Auth[Supabase Auth]
-  Browser -->|アクセストークン| API[Supabase Edge Functions]
-  API -->|ユーザーを検証| Auth
-  API -->|購入権限を照会| DB[Supabase DB]
-  Browser --> Local[端末内の記録・回避額・行動プラン]
-  API -->|将来：480円の一回払い| Stripe[Stripe Checkout]
-  Stripe -->|将来：署名付きWebhook| Hook[Webhook専用Edge Function]
-  Hook -->|支払い状態を確認し更新| DB
+  Page[GitHub Pages / HTML CSS JavaScript] --> Auth[Supabase Auth / マジックリンク]
+  Page -->|検証対象のアクセストークン| API[Supabase Edge Functions]
+  API -->|ユーザー本人の確認| Auth
+  API -->|契約権限照会| DB[Supabase / RLS]
+  API --> Checkout[Stripe Checkout / subscription]
+  API --> Portal[Stripe Customer Portal]
+  Stripe[Stripe Billing] -->|署名付きWebhook| Hook[受信関数 / 永続キュー]
+  Hook --> Worker[照合ワーカー / 定期再照合]
+  Worker -->|Stripe最新状態の取得| Stripe
+  Worker -->|トランザクションで投影| DB
+  Page --> Local[端末内のFREE / 回避額 / 行動プラン]
 ```
 
-Supabaseはログイン用メールアドレス・アカウントIDと購入権限、必要最小限の決済履歴を管理する。衝動・成功記録、言葉、金額・メモ、行動プランは送信しない。権限確認APIにこれらのデータを添付しない。
+認証の既存マジックリンク・将来のSMTP対応OTPは維持。ログインだけではPLUSを解放しない。利用者の衝動・成功・言葉・回避額・メモ・行動プランはサーバーへ送信せず、保存形式・キー・一括バックアップv1を変更しない。今のproviderのgetAccess()/subscribe()を将来のserver-providerへ置き換える。
 
-ブラウザはSupabaseの公開キーだけを持つ。service_role/サーバーsecret key、Stripe秘密鍵、Webhook secretはEdge Functionsの秘密設定にのみ置く。GitHub Pagesでは秘密環境変数を保持して処理することはできない。
+GitHub Pagesには秘密を置けない。公開キーのみフロントへ配置し、service_role、Stripe秘密鍵、Webhook署名secretはEdge Functionsの秘密設定へ置く。ブラウザへ配る分析・計算コードを完全に秘匿することはできない。将来のPLUSサーバー処理・データはリクエストごとに本人と有効な契約期限を検証する。
 
-## 3. メール認証
+## 契約・利用期限のルール
 
-### 推奨：メールのワンタイムコード（OTP）
-
-初期版はパスワードを持たない認証を推奨する。登録・ログインを分けて表示し、メールに届くワンタイムコードを入力する。メールテンプレートをコード認証用に設定する。実装時には採用SDK・プロジェクト設定でAPIとテンプレートの組み合わせを確認する。
-
-1. 登録：メールアドレス入力 → signInWithOtp（新規作成を許可）→ メール受信 → verifyOtp → Authのユーザー・セッション確立。
-2. ログイン：同様に送信するが、新規作成を許可しない。既存利用者が間違ったメールで新アカウントを作ってしまうことを避ける。
-3. 有効期限切れ・誤コード・再送制限を案内する。送信失敗からアカウントの存在を他人に断定させない文言にする。
-4. ログアウト：Authセッションを終了し、PLUS権限キャッシュを即時無効化する。端末内の利用者データは削除しない。
-
-パスワードがないため再設定は不要。同じメールで再認証する。メールを失った場合のサポート方針は別途決める。ログインメール変更は、確認済みユーザーIDを保った正規のメール変更フローで扱う。購入をメール文字列だけで紐付けない。
-
-### マジックリンクの選択肢
-
-メール内のリンクをクリックして認証する方式も採用可能。ただし、GitHub Pagesのリポジトリ配下URLを正確に許可し、実在する auth-callback.html を用意する。ルートの架空APIパスやSPAの存在しないURLに戻さない。
-
-PKCEでは認証要求を始めたブラウザの検証情報が必要になり、別ブラウザ・別端末でメールリンクを開くと失敗する場合がある。端末をまたぐ復元では、その端末で改めて認証を開始する。初期版はコード方式にして、この混乱を減らす。
-
-メールリンク/コード以外にパスワード方式を選ぶなら、メール確認付き登録、パスワードログイン、resetPasswordForEmailから専用戻り先でのパスワード更新を追加する。本計画では方式を混在させず、先にメールOTPを実装する。
-
-## 4. テーブル案
-
-auth.usersはSupabase Authが管理する。独自のパスワードや認証トークンをテーブルへ保存しない。
-
-| テーブル | 主な列 | 用途 |
-|---|---|---|
-| public.plus_entitlements | user_id、product_code、status、granted_at、updated_at | 現在の利用権。ユーザー＋商品で一意 |
-| public.plus_purchases | id、user_id、product_code、provider、checkout_session_id、payment_intent_id、price_id、amount_total、currency、status、paid_at、updated_at | 決済との対応。ブラウザから直接操作不可 |
-| public.plus_webhook_events | event_id、event_type、processed_at | 重複通知防止。StripeイベントIDで一意 |
-
-product_codeはアプリ内の安定した商品識別子（例：hazure_plus）。Stripeの商品/Price IDは実際のテスト設定を確認してサーバーで対応付ける。価格表示は480円だが、現在は実IDを作成・仮定しない。
-
-entitlements.statusは active / revoked / suspended。日時は監査用であり、サブスクリプション期限を表さない。買い切りに更新課金・自動失効を設けない。
-
-purchases.statusは pending / paid / refunded / canceled / disputed 等。通知の順序を信用せず、最新の決済状態から再計算する。同じユーザーに複数の有効購入があれば、一件の返金だけで残りの有効権利を消さない。購入済みの重複購入はCheckout作成時にも抑止する。
-
-## 5. SQL・RLS案（未実行）
-
-以下は最低限のたたき台。SQL migrationは次の実装段階で作成・検証する。
-
-```sql
-create table public.plus_entitlements (
-  user_id uuid not null references auth.users(id) on delete restrict,
-  product_code text not null,
-  status text not null check (status in ('active','revoked','suspended')),
-  granted_at timestamptz,
-  updated_at timestamptz not null default now(),
-  primary key (user_id, product_code)
-);
-
-alter table public.plus_entitlements enable row level security;
-revoke all on public.plus_entitlements from anon, authenticated;
-grant select on public.plus_entitlements to authenticated;
-
-create policy read_own_entitlement
-  on public.plus_entitlements for select to authenticated
-  using ((select auth.uid()) = user_id);
-```
-
-利用者向けのINSERT/UPDATE/DELETEポリシーは作らない。読み取りも本人の行だけ。権限付与はサーバーの管理処理だけが行う。
-
-plus_purchasesとplus_webhook_eventsにもRLSを有効化し、anon/authenticatedへの権限をすべて取り消し、利用者向けポリシーを作らない。checkout_session_id、payment_intent_id、event_idは一意制約を付ける。DB更新用の関数を用意する場合は、一般利用者のEXECUTE権限を取り消し、固定search_path等を設定する。
-
-service_role/サーバーsecret keyはRLSを回避できるため、Edge Function側でも必ずユーザーを検証する。クライアントから渡されたuser_idを信用しない。user_metadataのisPlusや編集できるJWT属性も購入の証拠にしない。
-
-Authユーザー削除は購入復元と決済保存義務に関わるため、上記では勝手な連鎖削除を避ける。退会・返金・保存期間・匿名化の方針を確定してから専用処理を設計する。不要な決済情報を無期限に保存しない。
-
-## 6. 購入権限確認フロー
-
-フロントの権限API案：GET /entitlement（Supabase Edge Functions上の関数）。ログイン済みアクセストークンをAuthorizationに付ける。サーバーはAuthのgetUser等でトークンとユーザーを検証し、そのユーザーのhazure_plus権限を照会する。単にJWTをデコードして信じない。
-
-成功した照会でのみ以下を返す。詳細な決済識別子や別ユーザーの情報は返さない。
-
-```json
-{"status":"plus","allowed":true,"source":"server"}
-```
-
-権利なし/取消済みを正常に確認した場合はfree＋理由。通信失敗・DB失敗・不正レスポンスはエラーとして扱い、freeへ変換しない。
-
-| フロント状態 | 意味 | 動作 |
-|---|---|---|
-| free＋未ログイン理由 | ログインしていない。購入有無は未確認 | FREE利用、購入済みの人へログイン案内 |
-| pending | ログイン/権限確認中 | 確認中表示。購入案内で対処を妨げない |
-| free＋未購入理由 | サーバーで権利なしを正常に確認 | 未購入表示。FREEを維持 |
-| plus | サーバーでactiveを確認 | PLUS利用 |
-| error | 認証/通信/購入確認失敗 | 「確認できません」を表示。未購入と断定しない |
-
-pending/error/freeの場合はPLUS編集を許可しないが、保存データは削除しない。バックアップ・削除等の利用者データ管理は購入権限と分離する。認証失敗でもFREEの演出・記録・言葉・設定は使える。
-
-起動・ログイン成功・ユーザー切り替え・トークン更新・決済後の戻り・再読み込みで再確認する。タブが再表示されたときにも適切な間隔で再確認する。以前のallowed=trueを永続化して権限判定に使わない。
-
-非同期の確認は要求番号とユーザーIDを照合する。ログアウト後や別ユーザーへの切り替え後に、古い成功応答が届いてPLUSを復活させない。再試行の連打を抑制し、通信待ちの上限を設ける。オフライン時は以前の権限を本物として推測せず、確認不能として扱う。
-
-## 7. ローカルデータとセキュリティ境界
-
-FREE・回避額・行動プランの保存形式、キー、一括バックアップv1はそのまま。権限行や認証セッションを利用者JSONへ追加しない。JSONにisPlus等を混入してもサーバーDBへ書き込む処理はない。
-
-Supabase SDKの認証セッションは専用の保存領域で扱う。一括バックアップは現在の3キーのホワイトリストだけなのでセッションは含まない。SDKがトークンをブラウザに保存する場合、それは認証のためであり、購入済みフラグではない。偽のトークンやブラウザ上の状態変更はサーバーで検証される。
-
-ただし、HTML/JavaScriptと端末内計算だけの機能を、開発者ツールを持つ利用者から完全に秘匿することはできない。クライアントUIのロックは購入権限そのものではない。将来のPLUSサーバーAPI・データはリクエストごとに認証とDB上の権限を検証する。完全なコピー防止と説明しない。
-
-本番では開発用デモprovider・状態セレクターを使用する経路を除く。ローカル開発版と本番構成を明確に分け、認証設定不足でデモに自動フォールバックしない。設定不足時もFREEは動く。
-
-インポート文字列は今後もtextContent等で表示し、HTMLとして実行しない。公式SDKを採用する場合はバージョンを固定・検証して配信し、秘密を含まない公開設定を分離する。CSPのconnect-srcは確認済みのSupabaseプロジェクト先等へ限定する。GitHub Pagesの制約に合わせて設定方法を確認する。ログ・画面・URLに認証コードやトークンを残さない。
-
-## 8. 将来のStripe連携（今回は未実装）
-
-- create-checkout：必ずログイン検証。購入済みを確認し、サーバー設定の商品・JPY 480円・mode=paymentでCheckoutを作る。月額や自動更新は使わない。金額、Price ID、ユーザーIDをブラウザ入力から採用しない。
-- 作成したSessionと検証済みuser_idをサーバー側で対応付ける。決済完了URLやメールアドレスだけで権限を付与しない。
-- Webhook：この通知元は利用者のAuthトークンを持たないため、専用エンドポイントでStripe署名を生本文に対して検証する。署名・時刻・対象環境・決済状態・商品/Price・通貨/金額・サーバー側ユーザー対応を確認する。
-- 通知IDの保存、購入履歴の更新、権限の再計算はDBトランザクションで行う。処理済みイベントIDを事前に記録するだけで途中終了させない。重複通知も安全に応答する。
-- 決済の最新状態をStripeへ照会し、通知の順序逆転で返金後に権利を復活させない。遅延決済では支払い済みを確認するまでactiveにしない。
-- 全額返金では対象購入をrefundedにし、残る有効購入から権限を再計算する。部分返金・異議申し立て時のsuspended/revoked方針は販売前に確定する。
-- 購入後の戻りは確認中から再照会する。Webhookが遅れても「未購入」と即断して再購入させない。確認上限後は案内と手動再試行を提供する。
-- 再読み込み・別端末でも同じAuthユーザーIDで権限を取得する。端末内の記録は自動同期しない。一括JSONで移行する。
-
-テストと本番はSupabaseプロジェクト/Stripeモード/秘密/Price/Webhook/データを分ける。テスト購入を本番権限にしない。Webhook専用ルートのプラットフォームJWT設定は実装時に確認し、必要な設定変更は署名検証を必須としたそのルートだけに限定する。他のAPIの認証を無効化しない。
-
-## 9. 必要な設定（値は未確定）
-
-| 設定 | 公開可否・保存場所 |
+| 場面 | 契約情報と権限の扱い |
 |---|---|
-| SUPABASE_URL | 公開可。選んだプロジェクトのURL |
-| SUPABASE_PUBLISHABLE_KEY | 公開用キー。旧方式ならanonキー。RLS前提 |
-| APP_URL / Auth許可URL | 実際のGitHub Pagesのリポジトリ配下URL。ルートを推測しない |
-| Auth方式・メールテンプレート・コード期限・再送制限 | Supabase Auth設定。採用時に値を確認 |
-| メール送信用SMTP情報 | サービス設定の秘密。フロントに置かない |
-| SUPABASE_SERVER_SECRET / service_role | サーバー秘密設定のみ。実際のキー種別に合わせる |
-| PRODUCT_CODE | アプリ内の安定した商品名。サーバーで対応付け |
-| Stripe秘密鍵・Price ID・Webhook secret | 将来のサーバー秘密/設定。今回は作成しない |
-| 許可する通信元・戻り先 | GitHub Pagesのoriginと正確なパス、承認済みの開発先 |
+| 未ログイン | 契約有無は未確認。FREE利用可能 |
+| 新規契約 | Checkout完了画面だけでは解放しない。対象月の支払済みinvoiceと契約を照合後に許可 |
+| 更新成功 | invoiceの対象利用期間を確認して有効期限を延長 |
+| 解約予約 | cancel_at_period_end=true。支払い済み期間末までPLUS、次回請求予定なし |
+| 予約取消 | Portalの設定で許す場合のみ更新を再開。支払い済み期間は変えない |
+| 期間終了 | サーバー時刻がvalid_until以上なら拒否。Webhookが遅れてactive行が残っても延長しない |
+| 更新決済失敗 | 決済失敗と案内。既に支払い済みの期間は維持し、期限後はPLUS停止。無償猶予は設けない |
+| 失敗後の回収成功 | 支払済みinvoiceの期間を再照合し、現在時刻を含む期間があれば再開 |
+| 即時解約・unpaid・paused | 停止時点で権限停止。通常の利用者解約は期間末予約に統一 |
+| 全額返金 | 対応invoiceの期間を無効化。他の有効な支払済み期間があればそれだけは維持 |
+| 部分返金 | 今回の設計方針は対応期間を維持。販売前に規約・運用として確定する |
+| 異議申立て | 対象契約を安全側に停止し、調査・解決後に再照合。自動で他契約を消さない |
+| 再契約 | 同じAuth userとCustomerに新subscriptionを紐付ける。終了済み契約を上書きせず履歴を保持 |
 
-静的ページの設定は公開configモジュール、または生成された公開設定として配信する。フロントに環境変数という名前で埋め込んでも公開される点に注意。CORSではGitHub Pagesのoriginを指定するが、originはアクセス権の証拠ではない。複数リポジトリは同じoriginを共有するため、JWTとDB検証を必ず併用する。
+返金額は成功した返金だけをStripeから再取得して集計する。pending/failed/canceledの返金要求を全額返金として扱わない。返金だけで継続契約が自動解約されるとは考えず、今後の請求も止める場合は別途解約処理を行う。
 
-現在のURL、Auth方式、テスト用Supabaseの有無、メール送信元・サービスは次の接続段階の前に確認する。秘密値をチャットに貼るのではなく、承認後の安全な設定画面に登録してもらう。
+無償trial、クーポン、日割り価格変更、複数商品、手動請求は初版では提供しない。Stripe status=activeだけでも、Checkout成功URLでも権利を認めない。初版は固定月額Price・自動回収・支払済み対象期間の組み合わせで確認する。Stripeの月間隔を使い、30日を加算して期限を作らない。
 
-## 10. 開発から公開まで
+権限の判定はサーバー時刻で `status=active AND valid_from <= now < valid_until`、かつ対応契約が停止対象でないこと。支払済み期間をまとめる際は隙間を埋めない。将来期間だけのinvoiceから現在の権利を作らない。複数履歴は現在を含む連続した有効期間を投影し、最長の終了日だけで過去からの権利を推測しない。
 
-1. この設計を確認。Auth方式・公開URL・部分返金/退会方針を決める。
-2. 次段階は外部接続なしで認証UIとserver-providerの境界・モックテストを用意する。FREEと既存48件を維持する。
-3. 接続承認後、専用のテストSupabaseを準備する。テーブル/RLS migrationをレビューして適用し、メール送信と公開用設定を登録する。
-4. 実際のテスト認証とログアウトを検証する。二人のユーザーで他人の権限を読めず、本人も購入権限を書き込めないことを確認する。
-5. 購入権限照会APIとproviderを接続する。権利なし・active・取消・通信失敗をテスト用管理処理で作り、更新・再ログイン・別端末を検証する。利用者向けの自由な権限付与APIは作らない。
-6. 別の承認後、Stripeテスト決済・Webhookを実装し、重複/遅延/順序逆転/返金を確認する。
-7. 販売ページ、特商法表記、利用規約、プライバシー、返金・サポート方針を準備する。
-8. 本番環境は別途承認後に作成・設定。本番デモ経路なし、秘密漏えいなし、全テスト成功を確認する。
-9. commit・push・GitHub Pages反映・本番決済有効化は、その時点の明示承認後だけ行う。継続監視と問い合わせ対応を開始する。
+## テーブル・RLS案
 
-## 11. テスト計画
+未適用のSQL本体：[`../sql/subscription-entitlements.sql`](../sql/subscription-entitlements.sql)。新しいテストDB向けのレビュー案で、既存テーブルへの自動移行SQLではない。旧設計は提案のみだったが、適用先に同名テーブルが存在する場合は止めて別migrationをレビューする。既存権利を推測して変換しない。
 
-- 既存48件＋7本のブラウザテストを維持する。
-- OTP登録/ログイン/期限切れ/誤コード/再送/ログアウト、ユーザー切り替え。
-- 確認中・未購入・購入済み・確認失敗・タイムアウトを区別する。
-- ログアウト後の遅い応答、再読み込み、別端末、オフライン。
-- 他人の行、本人のINSERT/UPDATE/DELETE、偽user_metadata、偽JWTの拒否。
-- localStorage/一括JSONの改ざんで権利が得られず、バックアップにセッションが含まれないこと。
-- 署名不正/重複/金額違い/未払い/返金/順序逆転/テスト本番混同。
-- 320〜1440px、FREEの5秒演出、衝動の対処中に購入案内を出さないこと。
+| テーブル | 用途 |
+|---|---|
+| billing_private.customers | 検証済みAuth userとStripe Customerの一意対応、テスト/本番区分 |
+| billing_private.subscriptions | Stripe契約、期間、解約予約、次回請求予定、停止、最新照合時刻 |
+| billing_private.invoice_periods | 支払済みinvoiceごとの期間・支払額・返金額・状態 |
+| billing_private.webhook_events | event.id一意、処理状態・再試行・処理lease。生の決済payloadを保存しない |
+| public.plus_entitlements | 本人向けの最小契約概要、有効開始/終了、契約期間終了、次回請求予定、決済状態 |
 
-## 12. 費用・運用
+全テーブルRLS有効。public.plus_entitlementsはauthenticatedにSELECTだけ許可し、auth.uid()=user_idの本人行のみ。INSERT/UPDATE/DELETEは禁止。内部billing_privateはData APIの公開schemaに追加せず、anon/authenticatedのschema/table権限を取り消す。service_roleのみ内部処理可能。将来の更新RPCは一般利用者のEXECUTEを取り消し、固定search_pathでサーバー専用にする。
 
-最新の料金は今回確認していない。契約前に公式料金と利用制限を確認する。以下は予算用の概算で、確定見積もりではない。
+service_roleはRLSを回避するためAPI自身もgetUser等でトークンを検証する。ブラウザ指定user_id、メール文字列、user_metadata、localStorageのPLUSフラグを信用しない。user_idはAuthで確定し、Customerは内部DBで決定。退会時は課金停止・保存義務・匿名化方針を確定後に専用処理を設け、Auth削除で課金履歴を連鎖削除しない。
 
-GitHub Pagesは現在の静的配信を維持する。Supabaseは小規模なら無料枠から試せるが、休止・処理量・Auth/メール制限を本番で確認する。Proは月25米ドル程度からを予算目安とする。Edge Functions/DB/Authの上限超過、メール配信、ドメイン等は別途条件次第。仮に1米ドル150円なら25米ドルは月3750円。
+## Checkout・Customer Portal
 
-認証メールは本番の送信元、到達性、迷惑メール、送信上限への対応が必要。標準メールサービスだけで一般利用者へ十分送れるとは仮定しない。商用のSMTP設定を確認する。ドメインは年1500〜4000円程度、メールは小規模無料枠または有料を候補とする。
+1. create-checkoutは本人認証、既存契約と未完了Checkoutの重複防止を実施。ユーザー単位のロック/購入要求IDとStripe idempotency keyを使う。再試行で別契約を作らない。
+2. サーバーがJPY・月間隔・300円・税込設定の確認済みPrice ID、mode=subscription、quantity=1、Customer、成功/取消URLを選ぶ。初版ではtax_behavior=inclusiveの固定税込額を採用し、追加税で300円を超えないことをテストする。ブラウザの金額・商品・Customerを採用しない。
+3. subscription metadataへサーバーでuser対応を設定し、WebhookではDB対応も照合。知らないCustomerやPriceを受けても権利を作らない。
+4. create-portalも本人認証し、DBのCustomerだけにPortal sessionを生成する。他人のCustomer IDを受け取らない。return_urlは固定許可先。
+5. Portalは支払方法変更・請求履歴・期間末解約を許可し、商品変更/即時解約の提供範囲を設定で確認する。解約画面で終了日時、次回更新停止、返金が自動ではないことを表示する。実装前に解約・返金条件を確定する。
 
-Stripeを将来導入し、手数料を仮に3.6%とした場合、480円の決済手数料は約17円、残額は約463円（税・返金・他費用前）。買い切りでも認証/DB/サポートの維持費は続く。仮のSupabase月3750円なら約9件/月の販売に相当するが、実際の料金・税・労務は別に計算する。
+次回請求日はStripeの請求周期・予定invoiceから得る「予定」であり、独自に1か月加算しない。解約予約・期限切れではnull。DB取得に失敗したら「確認できません」、正常取得で未定なら「未定」。契約期間終了日は対象PLUS subscription itemのperiod_endを採用する。Stripe APIの固定バージョンによりperiodの位置が異なるため、契約本体/対象itemのどちらにあるか実接続で確認する。日本時間で表示し、期限はUTC timestamptzで管理する。
 
-確認先：
-- https://supabase.com/pricing
-- https://supabase.com/docs/guides/auth/auth-email-passwordless
-- https://supabase.com/docs/guides/auth/auth-smtp
-- https://supabase.com/docs/guides/database/postgres/row-level-security
-- https://supabase.com/docs/guides/functions
-- https://stripe.com/jp/pricing
+## Webhookと整合性
+
+対象例：checkout.session.completed / checkout.session.async_payment_succeeded / checkout.session.async_payment_failed、customer.subscription.created/updated/deleted、invoice.paid/payment_failed、charge.refunded、refund.updated、charge.dispute.created/closed。採用API版のイベント一覧とinvoice→支払い→返金の対応をテスト環境で検証する。通知そのものを権限付与の命令として扱わない。
+
+- 未加工のリクエストbodyとStripe-Signatureを公式署名検証処理へ渡し、時刻許容を検証。Webhookには利用者JWTの代わりに署名が必要。署名不正は拒否する。
+- livemode、Customer、Price、通貨、月間隔、invoice対象行と期間、請求・実支払状態をサーバーで確認する。支払失敗invoiceや非同期未確定決済では延長しない。APIバージョンを固定する。
+- event.idを一意で永続キューへ保存してから2xx。同じIDのpending/failedイベントを「処理済み」と誤認せず再試行する。保存失敗は非2xx。内部詳細や秘密をログに出さない。
+- ワーカーは期限付きleaseを取得し、Stripeの現在のsubscription・invoice・返金・異議状態を再取得する。event.createdの大小だけで巻き戻しを防げるとは考えない。
+- 同じCustomer/userの照合を直列化し、古いワーカーの投影をfencing token/照合世代で拒否する。Stripe取得前から同じ照合leaseを持ち、更新トランザクションで所有権を再検証する。期限切れleaseのワーカーはcommit不可。
+- 契約・invoice・権限の投影更新とイベントprocessed記録は1つのPostgresトランザクション。途中失敗はrollback、再試行可能にする。外部Stripe取得までDBトランザクションで原子的にはできないため、イベントの後続照合と定期ジョブで収束させる。
+- Stripe API取得失敗は権利なしへ書き換えない。直前の確定期限を勝手に延長せず、APIは確認失敗を返す。未処理/failedの監視、再試行上限・運用通知を設ける。
+- 定期照合でWebhook欠落、期間境界、Portal操作を回復。通常の権限APIでもDBの期限を毎回検証し、期限後activeを許可しない。返金/停止の反映遅延を完全ゼロとは保証しない。照合鮮度の上限を定義し、古すぎる場合は再照合または確認失敗にする。
+
+## フロントの状態・認証後の再取得
+
+| 状態 | 表示と操作 |
+|---|---|
+| signed-out / unknown | 未ログイン・契約未確認。FREEは利用可能 |
+| checking | 契約確認中。FREEの衝動対処を妨げない |
+| active | 有効な契約、利用期限、次回請求予定を表示 |
+| cancel-scheduled | 解約予約済み、期間終了日時と次回更新なしを表示 |
+| none / expired | サーバーで正常確認した未契約/期限切れ。FREEへ戻る |
+| payment-failed / suspended | 決済失敗/停止を未契約と区別。残りの有効期間があればその期限まで利用可能 |
+| error | 契約を確認できません。未契約と断定せず再試行。FREE・バックアップは維持 |
+
+API応答例：status、allowed、validUntil、currentPeriodEnd、nextInvoiceAt、cancelAtPeriodEnd、paymentState、checkedAt。allowedはサーバーで計算。ログイン、起動、再読込、ユーザー切替、token更新、Checkout/Portalからの帰還、タブ復帰、期間境界で再取得する。成功URLのsession_idや状態を権利の証拠にしない。決済直後は確認中を表示し、上限付き再試行後に未反映の案内を出す。別端末でも同じAuth userならサーバー契約を復元するが、端末内記録は自動同期しない。
+
+ログアウト時にメモリ内権限を破棄。非同期応答は要求世代とuser_idを照合し、古い応答で権利を復活させない。契約権限・デモ状態・認証情報はバックアップに含めず、JSON編集で契約を作れない。通信失敗時の永続allowed=trueを信用しない。本番ではデモ経路を無効にし、設定不足でデモへフォールバックしない。
+
+## 解約・データ管理
+
+期限後もFREEの全機能、言葉、記録、設定、5秒演出を維持する。PLUSの分析・編集は有効な契約期間だけ許可する設計だが、既存の回避額・行動プランを削除しない。FREE/PLUS一括バックアップ・復元・個別データの書き出し/削除は契約権限と分離する。PLUSの個別管理画面が非表示でも設定画面の一括バックアップは利用できる。再契約時は端末内の既存データを再利用できる。これは今後の本番provider実装方針であり、今回のローカルデモの操作は変更しない。
+
+## 設定・実装順・未検証事項
+
+公開設定：Supabase Project URL、publishable key、Auth戻り先、環境モード。現在は接続無効・値空欄を維持する。
+サーバー秘密設定：SUPABASE_URL、サーバー専用キー、STRIPE_SECRET_KEY、STRIPE_WEBHOOK_SECRET。
+サーバー一般設定：STRIPE_PRICE_ID_MONTHLY、固定API版、PRODUCT_CODE、承認済みAPP_BASE_URL/CORS、テスト本番区分、照合鮮度と再試行設定。実値は推測しない。
+Stripe Dashboard：月額300円JPYの税込Price、subscription Checkout、Portalの期間末解約/支払方法変更、Webhook、再請求ルール。Supabase：RLS案、非公開schema、サーバー専用RPC、処理キュー/定期ジョブ。SMTP・Redirect設定は既存認証手順を参照する。
+
+次段階は、この設計のレビュー → ローカルserver-provider/照合ロジックのモックテスト → 承認後のテストDB SQL適用と二人でのRLS検証 → Stripeテストモードで契約/更新/失敗/予約解約/返金/再契約・順序逆転を検証 → 規約・サポート・運用監視 → 別途承認後の本番設定。mainへのpushや公開、実決済の有効化は今回行わない。
+
+初回設計時は静的確認のみだったが、セキュリティレビューで隔離したローカルPostgreSQL上のSQL実行・RLS/ACL試験を追加した。Supabase実環境のJWT/HTTP/RLS、Stripeイベント/APIの版別応答、メール・決済・Portal・実契約の復元、競合制御・worker/RPCは引き続き未実装/未検証。
+
+料金は契約時に公式料金を確認する。Stripe決済手数料に加えてStripe Billingの利用料、Supabase、SMTP、監視等が発生し得る。300円がそのまま収益ではない。月額料金と解約・返金条件、事業者情報・特商法表示・プライバシーを販売前に整える。
+
+公式確認先（今回、最新の設定画面・価格を実接続で確認していない）：
+- https://docs.stripe.com/billing/subscriptions/overview
+- https://docs.stripe.com/payments/checkout/build-subscriptions
+- https://docs.stripe.com/customer-management
 - https://docs.stripe.com/webhooks
+- https://supabase.com/docs/guides/database/postgres/row-level-security
+- https://stripe.com/jp/pricing
+- https://supabase.com/pricing
 
-## 13. 次段階のCodex指示案
+## 次段階のCodexへの指示案
 
 ```text
-ハズレの記憶 PLUSの認証・購入権限設計書に沿い、まず外部接続なしのUI・モック基盤だけを実装してください。
-価格は480円（税込・買い切り）、自動更新なしです。
-メールOTPの登録/ログイン/ログアウト画面、getAccess()/subscribe()に対応するserver-provider境界を用意してください。
-実際のサービス接続、プロジェクト作成、メール送信、購入権限付与、Stripe連携はまだ行わないでください。
-未ログイン、確認中、権利なし、購入済み、確認失敗を区別し、失敗を未購入と扱わないでください。
-本番providerと開発用モックを分け、設定不足でデモへ自動フォールバックしないでください。
-FREEと既存の48件の自動テスト・7本のブラウザテスト、端末内データ・一括バックアップを維持してください。
-作業前の状態を保全し、遅い応答・ログアウト・ユーザー変更・改ざん・失敗時のFREE利用と320〜1440pxをテストしてください。
-commit・push・公開設定変更は承認まで行わず、結果を報告してください。
+月額300円（税込）PLUS契約設計に沿い、まずserver-providerと契約照合ロジックをモックで実装してください。
+有効期間だけPLUSを許可し、解約予約・支払失敗・期限切れ・全額/部分返金・再契約・通信失敗を区別してください。
+Webhook重複・順序逆転・lease失効・遅い認証応答をテストしてください。
+FREE、端末内データ、一括バックアップ、5秒演出を維持し、本番でデモを許可しないでください。
+実DB適用、Stripe接続、commit/push、公開は別途承認まで行わず、未検証事項を報告してください。
 ```
+
+## 実DB適用前セキュリティレビューによる補強
+
+詳細な指摘・検証手順・判定は [subscription-security-review.md](subscription-security-review.md) を参照する。初期SQLは再実行を無害な成功として扱わず、既存schema/table/functionがあれば最初に拒否する。全体をBEGIN/COMMITで実行し、エラー時はROLLBACKする。クライアントのCREATE、BYPASSRLS・管理ロール継承があれば適用を停止する。管理者/所有者としてのみ適用する。
+
+追加した2関数はともにSECURITY INVOKER・search_path空欄で、SECURITY DEFINER関数はない。get_plus_access()はauthenticated本人のRLS対象行だけを読む。anon/PUBLICのEXECUTEを取り消し、返金保護trigger関数はサーバー専用とする。通常workerはinvoice台帳をDELETE/TRUNCATEできず、支払済みinvoiceの識別子・期間・支払額は更新不可。成功返金額の減少と全額返金/void状態の巻き戻しをtriggerで拒否する。正規の訂正や保存期間終了に伴う削除は管理者による監査済み手順へ分離する。
+
+権限APIの最終許可はget_plus_access()のallowedを基準にする。生のstatus=activeを判定に使わない。関数はDB時刻で期限と開始時刻を確認し、未来の期間はnot_started、期限終了はexpired、verified_atが未来または5分より古い場合はerror/allowed=falseとする。クライアント時計を期限延長の根拠にしない。5分は初期の照合鮮度上限であり、変更時はSQL・運用設計を同時にレビューする。欠落行のnoneは照会成功時の権利なしを表すが、照合処理の失敗・未完了をAPIが把握している場合は、その状態を優先して確認失敗/確認中を返す。SQL関数はStripeの状態やキューの失敗まで確認するものではない。
+
+サーバーAPIは本人を検証したJWTでこのread-only RPCを呼ぶか、同じ条件を信頼できるサーバー処理で検証する。通常の権限照会にservice_roleを使って本人行のフィルターを忘れない。PLUSのサーバー処理が将来できた場合も、この確認を毎リクエストに適用する。
+
+Webhookの世代・lease列は排他制御そのものではない。次段階のサーバー専用RPCは、照合世代、owner、lease有効期限をWHERE条件に持つCASと行ロックで更新を確定し、失効したworkerを拒否する。返金triggerだけでは権限投影やDELETE可能な別テーブルを保護しきれない。invoiceの最新状態から投影する処理、停止状態の伝播、イベントprocessed記録を同一DBトランザクションに実装するまでは、本番の契約権限基盤が完成したとは扱わない。
+
+検証SQLは `tests/sql/subscription-security.sql`。ROLLBACKでfixtureを除去する、使い捨てテストDB専用の管理者スクリプト。ローカルでのみ使うAuth模擬環境は `tests/sql/local-supabase-fixture.sql` で、Supabase実DBには適用しない。Dockerがある環境では `node scripts/test-subscription-sql.cjs` で隔離PostgreSQLの再現テストを実行できる。実際のSupabase/Auth/PostgRESTの設定は別途検証が必要。
+
+空で未使用のテストschemaの取り消しには `sql/subscription-entitlements-rollback.sql` を用意した。データが1件でもあれば拒否し、CASCADEを使わない。データ付きDBは削除で戻さず、事前バックアップの復元計画または前進migrationをレビューする。現段階では使い捨てSupabaseテストDBへの検証適用のみ条件付きで可能、本番DBへの適用・販売開始は不可とする。
