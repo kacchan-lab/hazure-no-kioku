@@ -1,0 +1,16 @@
+:root{--text:#303936;--muted:#66716a;--green:#315c49;--border:#dce3db;--bg:#f6f7f3;--surface:#fff;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--text:#e6ebe7;--muted:#a3ada6;--green:#8fc0a6;--border:#3a4540;--bg:#151a18;--surface:#1d2420;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",Meiryo,sans-serif;line-height:1.9;font-size:16px}
+main{max-width:760px;margin:0 auto;padding:40px 16px 64px}
+.eyebrow{color:var(--green);font-weight:700;font-size:13px;letter-spacing:.12em;margin:0}
+h1{font-size:28px;line-height:1.5;margin:8px 0 4px}
+.date{color:var(--muted);font-size:14px;margin:0 0 28px}
+h2{font-size:18px;line-height:1.6;margin:36px 0 10px;padding-top:20px;border-top:1px solid var(--border)}
+h3{font-size:16px;line-height:1.6;margin:24px 0 4px}
+p,li{overflow-wrap:anywhere}
+ol,ul{padding-left:1.4em}
+li{margin:6px 0}
+a{color:var(--green);text-underline-offset:3px}
+.contact{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.end{text-align:right;color:var(--muted);margin-top:36px}
