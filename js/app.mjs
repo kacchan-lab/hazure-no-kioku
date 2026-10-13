@@ -28,7 +28,7 @@ $('urge').onclick=()=>{
   const drop=(index,phase)=>{slots[index].dataset.state='falling';setAnimationPhase(phase);};
   $('urge').disabled=true;setAnimationCaption('first');drop(0,'left');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});
   phaseTimers=[later(1500,()=>slots[0].dataset.state='landed'),later(1800,()=>drop(2,'right')),later(3300,()=>{slots[2].dataset.state='landed';setAnimationCaption('second');}),later(3600,()=>drop(1,'center')),later(5100,()=>{slots[1].dataset.state='landed';setAnimationPhase('miss','miss');})];
-  timer=later(6000,finishAnimation);
+  timer=later(8100,finishAnimation);
  }else finishAnimation();
 };
 $('skip').onclick=finishAnimation;
