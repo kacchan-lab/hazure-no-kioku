@@ -26,7 +26,7 @@ $('urge').onclick=()=>{
   const later=(delay,action)=>setTimeout(()=>{if(run===animationRun)action();},delay);
   const drop=(index,phase,text)=>{slots[index].dataset.state='falling';setAnimationPhase(phase,text);};
   $('urge').disabled=true;drop(0,'left','左の数字が降りてきます。');$('animation').classList.remove('hidden');$('animation').scrollIntoView({block:'center'});
-  phaseTimers=[later(1500,()=>slots[0].dataset.state='landed'),later(1800,()=>drop(1,'center','中央の数字が降りてきます。')),later(3300,()=>slots[1].dataset.state='landed'),later(3600,()=>drop(2,'right','右の数字が降りてきます。')),later(5100,()=>{slots[2].dataset.state='landed';setAnimationPhase('miss','ハズレ');})];
+  phaseTimers=[later(1500,()=>slots[0].dataset.state='landed'),later(1800,()=>drop(2,'right','右の数字が降りてきます。')),later(3300,()=>slots[2].dataset.state='landed'),later(3600,()=>drop(1,'center','中央の数字が降りてきます。')),later(5100,()=>{slots[1].dataset.state='landed';setAnimationPhase('miss','ハズレ');})];
   timer=later(6000,finishAnimation);
  }else finishAnimation();
 };
