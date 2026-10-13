@@ -1,21 +1,38 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#315c49"><title>ハズレの記憶 — その期待、本当に必要ですか？</title><link rel="stylesheet" href="style.css"><script type="module" src="js/app.mjs"></script></head>
-<body>
-<header><a class="brand" href="#home"><span class="brand-mark" aria-hidden="true">葉</span>ハズレの記憶</a><span class="header-note">立ち止まるための、小さな場所</span></header>
-<main>
-<nav aria-label="メイン"><button data-page="home" aria-current="page">ホーム</button><button data-page="history">振り返り</button><button data-page="words">自分の言葉</button><button data-page="settings">設定・データ</button></nav>
-<p id="notice" role="status" aria-live="polite"></p>
-<section id="home" class="page">
-<div class="intro"><p class="eyebrow">その気持ちに、ひと呼吸。</p><h1>その期待、<br>本当に必要ですか？</h1><p>「今日は勝てそう」と思ったら。<br>過去の自分の言葉に、少しだけ耳を傾けてみる。</p></div>
-<div class="card urge-card"><label for="intensity">今、打ちたい気持ちは <output id="intensity-value">5</output> / 10</label><input id="intensity" type="range" min="0" max="10" value="5"><div class="scale"><span>弱い</span><span>強い</span></div><button id="urge" class="primary large">パチンコを考えてしまった<span>立ち止まって、自分の言葉を読む →</span></button><p class="quiet">勝ち負けを楽しむための演出ではありません。</p></div>
-<div id="animation" class="card hidden" data-phase="start" aria-label="約5秒のハズレ演出"><p class="eyebrow">立ち止まるための演出</p><p id="animation-status" role="status" aria-live="polite">リーチ開始</p><div class="tiles" aria-hidden="true"><span><b>○</b></span><span><b>○</b></span><span><b>―</b></span></div><p class="quiet">必ずハズレで終了します。音声はありません。</p><button id="skip">演出をスキップ</button></div>
-<section id="result" class="card result hidden" tabindex="-1" aria-labelledby="message"><p class="result-label">ハズレ</p><p id="message-kind" class="eyebrow"></p><h2 id="message"></h2><button id="favorite" aria-pressed="false">☆ お気に入りに登録</button><div class="divider"></div><p class="gentle">ここから、現実の一歩を。</p><ul class="actions"><li>ホールから離れる・帰宅する</li><li>10分間ほかのことをする</li><li>散歩や運動をする</li><li>趣味や勉強に時間を使う</li><li>信頼できる人に連絡する</li></ul><button id="success" class="primary">今日は打たずに済んだ</button><p class="quiet">この衝動をやり過ごしたときに押してください。<br>言葉を見ただけでは、成功として記録しません。</p><a class="secondary-link" href="https://kacchan-lab.github.io/utanai-yusha/" target="_blank" rel="noopener noreferrer">打たない勇者を開く ↗</a></section>
-<p class="foot-note">衝動があっても、自分を責めなくて大丈夫。<br>このアプリは医療や専門的な支援の代わりではありません。</p>
-</section>
-<section id="history" class="page hidden"><p class="eyebrow">日々を、静かに振り返る</p><h1>振り返り</h1><div class="stats"><div class="card"><span>衝動を感じた回数</span><strong id="total">0</strong></div><div class="card"><span>やり過ごした自己申告</span><strong id="successful">0</strong></div></div><h2>日付ごとの記録</h2><p class="quiet">日時はこの端末の現地時刻で表示します。回数は日数ではありません。</p><div id="records"></div><h2>過去の自分の言葉</h2><div id="past-words"></div></section>
-<section id="words" class="page hidden"><p class="eyebrow">未来の自分へ、ひとこと</p><h1>自分の言葉</h1><form id="word-form" class="card"><label for="word-input">思い出したい言葉</label><textarea id="word-input" maxlength="120" required placeholder="あの日の気持ちを、短い言葉で。"></textarea><p class="quiet">1〜120文字。本名や具体的な金額は書かなくても大丈夫です。</p><button class="primary" id="word-submit">言葉を追加</button><button type="button" id="cancel-edit" class="hidden">編集を取り消す</button></form><div class="list-heading"><h2>言葉の一覧</h2><label><input type="checkbox" id="favorites-only"> お気に入りだけ</label></div><div id="word-list"></div></section>
-<section id="settings" class="page hidden"><p class="eyebrow">あなたに合った使い方で</p><h1>設定・データ</h1><div class="card"><h2>演出</h2><label class="setting"><input type="checkbox" id="animation-setting"> 短いハズレ演出を表示する</label><p>演出は約5秒で終了し、いつでもスキップできます。端末の「動きを減らす」設定が有効な場合も演出を省略します。</p><p class="quiet">音声：OFF（このアプリは音声を再生しません）</p></div><div class="card"><h2>記録の持ち出し・読み込み</h2><p>データはこのブラウザの localStorage に保存します。外部へ送信しません。ブラウザのデータ削除や端末の変更で記録が消える可能性があります。</p><button id="export">JSONをエクスポート</button><label class="file-label" for="import">JSONをインポート</label><input id="import" type="file" accept="application/json,.json"><p class="quiet">読み込みは現在の記録を置き換えます。先にエクスポートしてください。書き出したファイルは安全な場所で管理してください。</p></div><div class="card"><h2>全データの削除</h2><p>記録・お気に入り・設定・追加や編集した言葉を削除し、初期状態に戻します。元に戻せません。</p><button id="delete-all" class="danger">全データを削除</button></div></section>
-</main><footer>ハズレの記憶 <span>今日の時間を、自分に戻す。</span></footer>
-<dialog id="confirm-dialog"><h2 id="confirm-title">確認</h2><p id="confirm-text"></p><div class="dialog-actions"><button id="confirm-cancel">キャンセル</button><button id="confirm-ok" class="primary">実行する</button></div></dialog>
-</body></html>
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>ハズレの記憶</title>
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  <meta name="theme-color" content="#315c49">
+<link rel="icon" href="/hazure-no-kioku/favicon.ico"/></head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  <script src="/hazure-no-kioku/_expo/static/js/web/index-14b77326720821469f654ccd365f53d9.js" defer></script>
+</body>
+</html>
